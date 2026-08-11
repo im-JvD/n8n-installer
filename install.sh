@@ -216,8 +216,10 @@ update_n8n() {
     echo -e "${BLUE}	Updating n8n...${NC}"
     cd "$INSTALL_DIR"
     docker compose pull && docker compose up -d
-    echo -e "${GREEN}Updated.${NC}"
-    pause
+    echo -e "$	{GREEN}N8N Service has Updated.${NC}"
+    echo ""
+	docker compose logs -f --tail 10
+    echo ""
 }
 
 backup_restore_menu() {
@@ -462,9 +464,12 @@ EOF
 
                 rm -rf "$restore_dir"
 
-                echo -e "${GREEN}System restore completed successfully.${NC}"
+                echo -e "${GREEN}N8N System restore completed successfully.${NC}"
+				echo ""
                 echo -e "${YELLOW}Use Status & Live Logs to verify startup.${NC}"
-                pause
+				echo ""
+				docker compose logs -f --tail 10
+				echo ""
                 ;;
 
             0)
@@ -519,6 +524,9 @@ management_sub_menu() {
                 cd "$INSTALL_DIR" && docker compose up -d --force-recreate
 				echo ""
                 echo -e "${GREEN}	N8N Service Restarted.${NC}"; pause ;;
+				echo ""
+				docker compose logs -f --tail 10
+				echo ""
             2) backup_restore_menu ;;
             3) show_status_and_logs ;;
             0) break ;;
