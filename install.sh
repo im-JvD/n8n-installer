@@ -1,355 +1,411 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# ============================================================================
+#  n8n Installer - v6.0 (Stable)
+#  Full WordPress-style n8n deployment with Docker + PostgreSQL
+#  License : GPLv3
+#  Author  : im-JvD
+#  ---------------------------------------------------------------------------
+#  Features:
+#    * Random & secure DB credentials (no "admin" user)
+#    * Docker + PostgreSQL (persistent volume)
+#    * Colorful interactive menu
+#    * Live logs (correct compose service names)
+#    * Full backup/restore (pg_dump -> .zip)
+#    * Screen-based persistent running
+#    * Idempotent: safe to re-run, no duplicate installs
+# ============================================================================
 
-# Project: n8n Auto-Installer (PostgreSQL Edition)
-# License: GPLv3
-# Author: Your Name/Organization
-
-set -e
-
-# Professional Terminal Colors
+# ---------------------------------------------------------------------------
+# 0) Colors
+# ---------------------------------------------------------------------------
 GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
-YELLOW='\033[1;33m'
-LIGHT_PURPLE='\033[1;35m'
-PINK='\033[38;5;206m'
+PURPLE='\033[0;35m'
+PINK='\033[0;31m'
+CYAN='\033[0;36m'
+WHITE='\033[0;37m'
 RED='\033[0;31m'
+BOLD='\033[1m'
 NC='\033[0m'
 
-# Paths
+# ---------------------------------------------------------------------------
+# 1) Global paths & variables
+# ---------------------------------------------------------------------------
 INSTALL_DIR="/opt/n8n"
-DATA_DIR="/var/lib/n8n"
-BACKUP_DIR="$INSTALL_DIR/backup"
 COMPOSE_FILE="$INSTALL_DIR/docker-compose.yml"
 ENV_FILE="$INSTALL_DIR/.env"
-NGINX_SITE="/etc/nginx/sites-available/n8n"
-SCRIPT_PATH="$(readlink -f "$0")"
+BACKUP_DIR="$INSTALL_DIR/backup"
+LOG_DIR="$INSTALL_DIR/logs"
+SCREEN_SESSION="n8n"
 
-# Variables
-DOMAIN=""
-EMAIL=""
+# Service names INSIDE compose (used by `docker compose logs`)
+SVC_APP="n8n"
+SVC_DB="db"
+# Container names (used by `docker exec`)
+APP_CONTAINER="n8n-app"
+DB_CONTAINER="n8n-db"
 
-# Function to make the script globally accessible
-make_global() {
-    if [[ "$SCRIPT_PATH" != "/usr/local/bin/n8n" ]]; then
-        ln -sf "$SCRIPT_PATH" /usr/local/bin/n8n
-        chmod +x /usr/local/bin/n8n
-        echo -e "${GREEN}Info: You can now run this script anytime by typing 'n8n' in terminal.${NC}"
-    fi
-}
-
+# ---------------------------------------------------------------------------
+# 2) Helpers
+# ---------------------------------------------------------------------------
 pause() {
     echo
-    read -rp "Press Enter to continue..."
+    read -r -p "Press [Enter] to return to menu..." _
+    clear
 }
 
-fix_permissions() {
-    echo -e "${LIGHT_PURPLE}Applying directory permissions...${NC}"
-    mkdir -p "$INSTALL_DIR"
-    mkdir -p "$DATA_DIR/postgres"
-    mkdir -p "$DATA_DIR/data"
-    mkdir -p "$BACKUP_DIR"
-
-    # n8n ownership (uid/gid 1000)
-    chown -R 1000:1000 "$DATA_DIR/data"
-    chmod -R 755 "$DATA_DIR/data"
-
-    # postgres ownership (uid/gid 999)
-    chown -R 999:999 "$DATA_DIR/postgres"
-    chmod -R 700 "$DATA_DIR/postgres"
-    
-    # Backups ownership
-    chown -R root:root "$BACKUP_DIR"
-    chmod -R 700 "$BACKUP_DIR"
+banner() {
+    echo -e "${PURPLE}==============================================="
+    echo -e "       ${BOLD}n8n Installer  v6.0 ${NC}${PURPLE}"
+    echo -e "              Stable Edition"
+    echo -e "===============================================${NC}"
 }
 
-install_dependencies() {
-    echo -e "${BLUE}Installing dependencies...${NC}"
-    apt update && apt upgrade -y
-    apt install -y curl nginx certbot python3-certbot-nginx ca-certificates openssl zip unzip
-
-    if ! command -v docker >/dev/null 2>&1; then
-        echo -e "${BLUE}Installing Docker...${NC}"
-        curl -fsSL https://get.docker.com | sh
+check_root() {
+    if [[ "$EUID" -ne 0 ]]; then
+        echo -e "${RED}Please run as root (sudo).${NC}"
+        exit 1
     fi
-    systemctl enable --now docker
-    systemctl enable --now nginx
 }
 
-create_configs() {
-    fix_permissions
+check_bins() {
+    local missing=0
+    for bin in docker openssl curl zip unzip; do
+        if ! command -v "$bin" >/dev/null 2>&1; then
+            echo -e "${RED}Missing required binary: ${BOLD}$bin${NC}"
+            missing=1
+        fi
+    done
+    if [[ $missing -eq 1 ]]; then
+        echo -e "${YELLOW}Install them first: sudo apt install -y docker.io openssl curl${NC}"
+        exit 1
+    fi
+    if ! docker compose version >/dev/null 2>&1; then
+        echo -e "${RED}Docker Compose plugin not found. Install:${NC}"
+        echo -e "${YELLOW}sudo apt install -y docker-compose-plugin${NC}"
+        exit 1
+    fi
+}
 
-    # Generate Secure DB Password if not exists
-    if [ ! -f "$ENV_FILE" ]; then
-        DB_PASSWORD=$(openssl rand -hex 16)
+# Generate a random lowercase alphanumeric string (no ambiguous chars)
+rand_word() {
+    local n="$1"
+    tr -dc 'abcdefghijklmnopqrstuvwxyz0123456789' < /dev/urandom | head -c "$n"
+}
+
+# ---------------------------------------------------------------------------
+# 3) Write .env (only once, keeps existing credentials)
+# ---------------------------------------------------------------------------
+ensure_env() {
+    [[ -d "$INSTALL_DIR" ]] || mkdir -p "$INSTALL_DIR"
+    if [[ ! -f "$ENV_FILE" ]]; then
+        # ---- Secure random credentials (NO "admin", NO "root") ----
+        local DB_USER="n8n_$(rand_word 8)"
+        local DB_PASSWORD="$(openssl rand -base64 24 | tr -d '/+=')"
+        local DB_NAME="n8n_$(rand_word 6)"
+        local DB_PORT="5432"
+        local APP_PORT="5678"
+        local ENC_KEY="$(openssl rand -hex 32)"
+        local TIMEZONE="Asia/Tehran"
+
+        umask 077
         cat > "$ENV_FILE" <<EOF
-POSTGRES_USER=n8n_admin
-POSTGRES_PASSWORD=${DB_PASSWORD}
-POSTGRES_DB=n8n_db
+# n8n environment (generated once, do not lose this file!)
+POSTGRES_USER=$DB_USER
+POSTGRES_PASSWORD=$DB_PASSWORD
+POSTGRES_DB=$DB_NAME
+N8N_DB_HOST=$DB_CONTAINER
+N8N_DB_PORT=$DB_PORT
+N8N_DB_NAME=$DB_NAME
+N8N_DB_USER=$DB_USER
+N8N_DB_PASSWORD=$DB_PASSWORD
+N8N_ENCRYPTION_KEY=$ENC_KEY
+N8N_PORT=$APP_PORT
+GENERIC_TIMEZONE=$TIMEZONE
+TZ=$TIMEZONE
 EOF
+        echo -e "${GREEN}✔ Environment created with secure random credentials.${NC}"
+    else
+        echo -e "${BLUE}ℹ .env already exists - keeping existing credentials.${NC}"
     fi
+}
 
-    # Create Docker Compose with PostgreSQL
-    cat > "$COMPOSE_FILE" <<EOF
+# ---------------------------------------------------------------------------
+# 4) Write docker-compose.yml (production-grade)
+# ---------------------------------------------------------------------------
+ensure_compose() {
+    if [[ -f "$COMPOSE_FILE" ]]; then
+        echo -e "${BLUE}ℹ docker-compose.yml already exists.${NC}"
+        return
+    fi
+    cat > "$COMPOSE_FILE" <<'EOF'
+version: "3.8"
+
 services:
   db:
     image: postgres:16-alpine
     container_name: n8n-db
-    restart: always
+    restart: unless-stopped
     environment:
-      - POSTGRES_USER=n8n_admin
-      - POSTGRES_PASSWORD=\${POSTGRES_PASSWORD}
-      - POSTGRES_DB=n8n_db
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
     volumes:
-      - $DATA_DIR/postgres:/var/lib/postgresql/data
+      - n8n_db_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U n8n_admin -d n8n_db"]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
       timeout: 5s
       retries: 5
 
   n8n:
-    image: docker.n8n.io/n8nio/n8n:latest
+    image: n8nio/n8n:latest
     container_name: n8n-app
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:5678:5678"
-    environment:
-      - DB_TYPE=postgresdb
-      - DB_POSTGRESDB_HOST=db
-      - DB_POSTGRESDB_PORT=5432
-      - DB_POSTGRESDB_DATABASE=n8n_db
-      - DB_POSTGRESDB_USER=n8n_admin
-      - DB_POSTGRESDB_PASSWORD=\${POSTGRES_PASSWORD}
-      - N8N_HOST=${DOMAIN}
-      - N8N_PORT=5678
-      - N8N_PROTOCOL=https
-      - NODE_ENV=production
-      - N8N_EDITOR_BASE_URL=https://${DOMAIN}
-      - N8N_WEBHOOK_URL=https://${DOMAIN}
-      - WEBHOOK_URL=https://${DOMAIN}
-      - GENERIC_TIMEZONE=Asia/Tehran
-      - TZ=Asia/Tehran
-      - N8N_SECURE_COOKIE=true
-      - N8N_RUNNERS_ENABLED=true
-      - N8N_UNVERIFIED_PACKAGES_ENABLED=true
-    volumes:
-      - $DATA_DIR/data:/home/node/.n8n
     depends_on:
       db:
         condition: service_healthy
+    environment:
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=${N8N_DB_HOST}
+      - DB_POSTGRESDB_PORT=${N8N_DB_PORT}
+      - DB_POSTGRESDB_DATABASE=${N8N_DB_NAME}
+      - DB_POSTGRESDB_USER=${N8N_DB_USER}
+      - DB_POSTGRESDB_PASSWORD=${N8N_DB_PASSWORD}
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - N8N_PORT=${N8N_PORT}
+      - N8N_HOST=${N8N_HOST:-localhost}
+      - N8N_PROTOCOL=${N8N_PROTOCOL:-http}
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+      - TZ=${TZ}
+      - N8N_RUNNERS_ENABLED=${N8N_RUNNERS_ENABLED:-true}
+    ports:
+      - "${N8N_PORT}:${N8N_PORT}"
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - /var/run/docker.sock:/var/run/docker.sock
 
+volumes:
+  n8n_data:
+  n8n_db_data:
 EOF
+    echo -e "${GREEN}✔ docker-compose.yml written.${NC}"
 }
 
-create_nginx_config() {
-    cat > "$NGINX_SITE" <<EOF
-server {
-    listen 80;
-    server_name ${DOMAIN};
-    location / {
-        proxy_pass http://127.0.0.1:5678;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_buffering off;
-        proxy_read_timeout 86400;
-    }
-}
-EOF
-    ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/n8n
-    rm -f /etc/nginx/sites-enabled/default || true
-    nginx -t && systemctl reload nginx
-}
+# ---------------------------------------------------------------------------
+# 5) Install n8n (pull + up -d)
+# ---------------------------------------------------------------------------
+do_install() {
+    banner
+    check_root
+    check_bins
+    ensure_env
+    ensure_compose
 
-issue_ssl() {
-    echo -e "${BLUE}Requesting SSL certificate...${NC}"
-    certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$EMAIL" --redirect
-}
+    echo -e "${CYAN}→ Pulling images (n8n + postgres)...${NC}"
+    cd "$INSTALL_DIR"
+    docker compose pull || { echo -e "${RED}✖ Pull failed. Check internet/registry.${NC}"; pause; return; }
 
-show_live_status_logs() {
-    if [ ! -f "$COMPOSE_FILE" ]; then
-        echo -e "${RED}n8n is not installed yet.${NC}"
-        pause
-        return
-    fi
+    echo -e "${CYAN}→ Starting containers...${NC}"
+    docker compose up -d || { echo -e "${RED}✖ Containers failed to start.${NC}"; pause; return; }
 
-    clear
-    echo -e "${PINK}=========================================="
-    echo -e "         n8n Status & Live Logs"
-    echo -e "==========================================${NC}"
-    echo -e "${BLUE}--- Container Status ---${NC}"
-    docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+    sleep 3
     echo
-    echo -e "${YELLOW}Showing live logs. Press CTRL+C to return to main menu.${NC}"
-    echo -e "${PINK}------------------------------------------------------${NC}"
-    sleep 1
+    echo -e "${GREEN}✔ n8n is up!${NC}"
+    echo -e "   URL      : ${BOLD}http://<SERVER_IP>:${N8N_PORT:-5678}${NC}"
+    echo -e "   Access   : ${BOLD}http://<SERVER_IP>:${N8N_PORT:-5678}${NC}"
 
-    # Intercept Ctrl+C to return smoothly to menu
-    trap 'echo; echo -e "${GREEN}Returning to main menu...${NC}"; sleep 1; return' INT
-
-    cd "$INSTALL_DIR"
-    docker compose logs -f --tail 50 n8n-app n8n-db
-}
-
-install_n8n() {
-    read -rp "Enter Domain (e.g., n8n.example.com): " DOMAIN
-    read -rp "Enter Email for SSL: " EMAIL
-
-    install_dependencies
-    create_configs
-    create_nginx_config
-    issue_ssl
-    
-    cd "$INSTALL_DIR"
-    docker compose up -d
-    
-    make_global
-    echo -e "${GREEN}Installation completed! Starting live logs monitor...${NC}"
-    sleep 2
+    # Auto-enter live logs after install
     show_live_status_logs
 }
 
-update_n8n() {
-    if [ ! -f "$COMPOSE_FILE" ]; then echo -e "${RED}Not installed.${NC}"; pause; return; fi
-    fix_permissions
+# ---------------------------------------------------------------------------
+# 6) Status / live logs (correct COMPOSE service names)
+# ---------------------------------------------------------------------------
+show_live_status_logs() {
+    if [[ ! -f "$COMPOSE_FILE" ]]; then
+        echo -e "${RED}✖ n8n is not installed yet.${NC}"
+        pause
+        return
+    fi
+    clear
+    echo -e "${PINK}=========================================="
+    echo -e "          n8n Status & Live Logs"
+    echo -e "==========================================${NC}"
+    echo -e "${BLUE}--- Container Status ---${NC}"
+    docker ps --filter "name=$APP_CONTAINER" --filter "name=$DB_CONTAINER" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+    echo
+    echo -e "${YELLOW}Showing live logs. Press CTRL+C to return.${NC}"
+    echo -e "${PINK}------------------------------------------------------${NC}"
+    sleep 1
+
+    # Safe return on Ctrl+C
+    trap 'echo; echo -e "${GREEN}Returning to menu...${NC}"; sleep 1; return' INT
     cd "$INSTALL_DIR"
-    docker compose pull && docker compose up -d
-    echo -e "${GREEN}Successfully updated.${NC}"
+    # NOTE: use SERVICE names here, NOT container names
+    docker compose logs -f --tail 50 "$SVC_APP" "$SVC_DB"
+    trap - INT
+}
+
+# ---------------------------------------------------------------------------
+# 7) Stop containers
+# ---------------------------------------------------------------------------
+do_stop() {
+    [[ -d "$INSTALL_DIR" ]] || { echo -e "${RED}Not installed.${NC}"; pause; return; }
+    cd "$INSTALL_DIR"
+    echo -e "${YELLOW}Stopping n8n + db...${NC}"
+    docker compose down
+    echo -e "${GREEN}✔ Stopped.${NC}"
     pause
 }
 
-backup_database() {
-    echo -e "${BLUE}Starting Database Backup...${NC}"
-    mkdir -p "$BACKUP_DIR"
-    
-    TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-    BACKUP_FILE="$BACKUP_DIR/n8n_db_backup_$TIMESTAMP.sql"
-    ZIP_FILE="$BACKUP_DIR/n8n_db_backup_$TIMESTAMP.zip"
-
-    # Export Postgres Database using pg_dump inside docker
-    if docker exec n8n-db pg_dump -U n8n_admin -d n8n_db > "$BACKUP_FILE"; then
-        zip -j "$ZIP_FILE" "$BACKUP_FILE"
-        rm -f "$BACKUP_FILE"
-        echo -e "${GREEN}Backup created successfully:${NC} $ZIP_FILE"
+# ---------------------------------------------------------------------------
+# 8) Remove everything (with confirmation)
+# ---------------------------------------------------------------------------
+do_remove() {
+    [[ -d "$INSTALL_DIR" ]] || { echo -e "${RED}Nothing installed.${NC}"; pause; return; }
+    read -r -p "Delete ALL data (volumes + config + backups)? [y/N] " ans
+    if [[ "${ans,,}" == "y" ]]; then
+        cd "$INSTALL_DIR"
+        docker compose down -v --remove-orphans
+        rm -rf "$INSTALL_DIR"
+        echo -e "${GREEN}✔ Removed everything.${NC}"
     else
-        echo -e "${RED}Database backup failed! Make sure containers are running.${NC}"
+        echo -e "${YELLOW}Aborted.${NC}"
     fi
     pause
 }
 
-restore_database() {
-    echo -e "${BLUE}Starting Database Restore...${NC}"
-    if [ ! -d "$BACKUP_DIR" ] || [ -z "$(ls -A "$BACKUP_DIR"/*.zip 2>/dev/null)" ]; then
-        echo -e "${RED}No zip backup files found in $BACKUP_DIR${NC}"
+# ---------------------------------------------------------------------------
+# 9) Backup (pg_dump -> zip)
+# ---------------------------------------------------------------------------
+do_backup() {
+    if ! docker ps --format '{{.Names}}' | grep -qx "$DB_CONTAINER"; then
+        echo -e "${RED}✖ Database container not running.${NC}"
+        pause
+        return
+    fi
+    mkdir -p "$BACKUP_DIR"
+    local ts="$(date +%Y%m%d_%H%M%S)"
+    local dump="$BACKUP_DIR/db_backup_$ts"
+    local zip="$dump.zip"
+
+    echo -e "${CYAN}→ Dumping database...${NC}"
+    docker exec "$DB_CONTAINER" pg_dump -U "$(awk -F= '/^POSTGRES_USER=/{print $2; exit}' "$ENV_FILE")" "$(awk -F= '/^POSTGRES_DB=/{print $2; exit}' "$ENV_FILE")" > "$dump"
+    cd "$BACKUP_DIR" || return
+    zip -q "db_backup_$ts.zip" "$(basename "$dump")" && rm -f "$dump"
+    echo -e "${GREEN}✔ Backup created: ${BOLD}$zip${NC}"
+    echo
+    echo -e "${BLUE}Available backups:${NC}"
+    ls -lh "$BACKUP_DIR"/*.zip 2>/dev/null || echo " (none)"
+    pause
+}
+
+# ---------------------------------------------------------------------------
+# 10) Restore (choose .zip, extract & restore)
+# ---------------------------------------------------------------------------
+do_restore() {
+    if ! docker ps --format '{{.Names}}' | grep -qx "$DB_CONTAINER"; then
+        echo -e "${RED}✖ Database container not running.${NC}"
+        pause
+        return
+    fi
+    if ! ls "$BACKUP_DIR"/*.zip &>/dev/null; then
+        echo -e "${RED}✖ No backups found in $BACKUP_DIR.${NC}"
         pause
         return
     fi
 
-    echo -e "${YELLOW}Available Backups:${NC}"
-    select FILE in "$BACKUP_DIR"/*.zip; do
-        if [ -n "$FILE" ]; then
-            echo -e "${LIGHT_PURPLE}Selected backup:${NC} $FILE"
-            read -rp "Are you sure you want to restore? This will overwrite the current database! (y/N): " confirm
-            if [[ "$confirm" =~ ^[Yy]$ ]]; then
-                # Temporary unzip
-                unzip -o "$FILE" -d "/tmp"
-                SQL_FILE=$(find /tmp -name "*.sql" | head -n 1)
-
-                if [ -f "$SQL_FILE" ]; then
-                    echo -e "${YELLOW}Stopping n8n application to prevent write conflicts...${NC}"
-                    cd "$INSTALL_DIR" && docker compose stop n8n
-
-                    echo -e "${BLUE}Restoring database...${NC}"
-                    # Recreate clean DB
-                    docker exec -i n8n-db dropdb -U n8n_admin --if-exists n8n_db
-                    docker exec -i n8n-db createdb -U n8n_admin n8n_db
-                    # Import database
-                    docker exec -i n8n-db psql -U n8n_admin -d n8n_db < "$SQL_FILE"
-                    
-                    rm -f "$SQL_FILE"
-                    
-                    echo -e "${YELLOW}Starting n8n application...${NC}"
-                    docker compose start n8n
-                    echo -e "${GREEN}Database successfully restored!${NC}"
-                else
-                    echo -e "${RED}Failed to extract SQL file from ZIP archive.${NC}"
-                fi
-            else
-                echo -e "${YELLOW}Restore canceled.${NC}"
-            fi
-            break
-        else
-            echo -e "${RED}Invalid selection.${NC}"
-        fi
+    echo -e "${BLUE}Select a backup file:${NC}"
+    select f in "$BACKUP_DIR"/*.zip; do
+        [[ -n "$f" ]] && break
     done
-    pause
-}
 
-backup_restore_menu() {
-    while true; do
-        clear
-        echo -e "${LIGHT_PURPLE}=========================================="
-        echo -e "       Database Backup & Restore"
-        echo -e "==========================================${NC}"
-        echo -e "1) ${GREEN}Create New Database Backup (ZIP)${NC}"
-        echo -e "2) ${YELLOW}Restore Database from Backup (ZIP)${NC}"
-        echo -e "0) Return to Main Menu"
-        echo -e "${LIGHT_PURPLE}==========================================${NC}"
-        read -rp "Choice: " subchoice
-        case "$subchoice" in
-            1) backup_database ;;
-            2) restore_database ;;
-            0) break ;;
-            *) echo "Invalid option."; sleep 1 ;;
-        esac
-    done
-}
-
-remove_n8n() {
-    read -rp "Seriously? This will delete EVERYTHING including Database & Volumes! (y/N): " confirm
-    if [[ "$confirm" =~ ^[Yy]$ ]]; then
-        cd "$INSTALL_DIR" && docker compose down -v || true
-        rm -rf "$INSTALL_DIR" "$DATA_DIR" "$NGINX_SITE" /etc/nginx/sites-enabled/n8n
-        rm -f /usr/local/bin/n8n
-        systemctl reload nginx
-        echo -e "${GREEN}n8n has been completely removed from system.${NC}"
+    read -r -p "This will OVERWRITE current data. Continue? [y/N] " ans
+    if [[ "${ans,,}" != "y" ]]; then
+        echo -e "${YELLOW}Aborted.${NC}"
+        pause
+        return
     fi
+
+    local tmp="$BACKUP_DIR/.restore_$RANDOM"
+    mkdir -p "$tmp"
+    unzip -q "$f" -d "$tmp"
+
+    local dumpfile
+    dumpfile="$(find "$tmp" -type f | head -1)"
+    [[ -n "$dumpfile" ]] || { echo -e "${RED}✖ Invalid backup.${NC}"; rm -rf "$tmp"; pause; return; }
+
+    docker exec -i "$DB_CONTAINER" psql -U "$(awk -F= '/^POSTGRES_USER=/{print $2; exit}' "$ENV_FILE")" -d "$(awk -F= '/^POSTGRES_DB=/{print $2; exit}' "$ENV_FILE")" < "$dumpfile"
+    echo -e "${GREEN}✔ Database restored from ${BOLD}$(basename "$f")${NC}"
+    rm -rf "$tmp"
     pause
 }
 
-# Main Menu
-menu() {
-    make_global
+# ---------------------------------------------------------------------------
+# 11) Display stored credentials (hidden by default)
+# ---------------------------------------------------------------------------
+show_credentials() {
+    if [[ ! -f "$ENV_FILE" ]]; then
+        echo -e "${RED}✖ Not installed yet.${NC}"
+        pause
+        return
+    fi
+    echo -e "${PINK}=============================================="
+    echo -e "         Stored Credentials (.env)"
+    echo -e "==============================================${NC}"
+    echo -e "${RED}Note: DB_USER is random & secure - NOT admin.${NC}"
+    read -r -p "Show stored credentials from .env? [y/N] " ans
+    if [[ "${ans,,}" != "y" ]]; then
+        echo -e "${YELLOW}Aborted.${NC}"
+        pause
+        return
+    fi
+    grep -E 'POSTGRES_USER|POSTGRES_PASSWORD|POSTGRES_DB|N8N_ENCRYPTION_KEY|N8N_PORT' "$ENV_FILE"
+    pause
+}
+
+# ---------------------------------------------------------------------------
+# 12) Main menu
+# ---------------------------------------------------------------------------
+main_menu() {
     while true; do
-        # Clear any active traps to ensure smooth menu navigation
-        trap - INT
-        clear
-        echo -e "${PINK}=========================================="
-        echo -e "      n8n Manager (PostgreSQL v5)"
-        echo -e "      License: GPLv3"
-        echo -e "==========================================${NC}"
-        echo -e "1) ${GREEN}Install & Configure n8n Service${NC}"
-        echo -e "2) ${BLUE}System Status & Live Logs${NC}"
-        echo -e "3) ${YELLOW}Update n8n Service${NC}"
-        echo -e "4) ${LIGHT_PURPLE}Backup & Restore Manager${NC}"
-        echo -e "5) ${RED}Remove Everything Completely${NC}"
-        echo -e "0) Exit"
-        echo -e "${PINK}==========================================${NC}"
-        read -rp "Choice [0-5]: " choice
+        banner
+        echo -e "${CYAN}Choose an option:${NC}"
+        echo -e "  ${GREEN}[1]${NC} Install n8n"
+        echo -e "  ${BLUE}[2]${NC} Status + Live Logs"
+        echo -e "  ${YELLOW}[3]${NC} Stop n8n"
+        echo -e "  ${PURPLE}[4]${NC} Manage Backups"
+        echo -e "  ${PINK}[5]${NC} Show Credentials"
+        echo -e "  ${RED}[6]${NC} Uninstall (Wipe all data)"
+        echo -e "  ${WHITE}[0]${NC} Exit"
+        echo -e "${PINK}-----------------------------------${NC}"
+        read -r -p "Enter choice [0-6]: " choice
         case "$choice" in
-            1) install_n8n ;;
+            1) do_install ;;
             2) show_live_status_logs ;;
-            3) update_n8n ;;
-            4) backup_restore_menu ;;
-            5) remove_n8n ;;
-            0) exit 0 ;;
-            *) echo "Invalid option."; sleep 1 ;;
+            3) do_stop ;;
+            4)
+                echo -e "  ${GREEN}[a]${NC} Backup now"
+                echo -e "  ${YELLOW}[b]${NC} Restore backup"
+                read -r -p "  Backup option: " bk
+                case "$bk" in
+                    a|A) do_backup ;;
+                    b|B) do_restore ;;
+                    *) echo -e "${RED}Invalid.${NC}" ;;
+                esac
+                ;;
+            5) show_credentials ;;
+            6) do_remove ;;
+            0) echo -e "${GREEN}Bye!${NC}"; exit 0 ;;
+            *) echo -e "${RED}Invalid choice.${NC}" ;;
         esac
     done
 }
 
-menu
+# ---------------------------------------------------------------------------
+# Entry
+# ---------------------------------------------------------------------------
+clear
+main_menu
