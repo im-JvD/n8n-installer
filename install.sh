@@ -208,7 +208,7 @@ install_n8n() {
     systemctl start n8n-docker
     make_global
     echo -e "${GREEN}	Installation completed!${NC}"
-	docker compose logs -f --tail 50
+	docker compose logs -f --tail 10
 }
 
 update_n8n() {
