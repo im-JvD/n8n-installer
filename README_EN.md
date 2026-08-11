@@ -4,9 +4,9 @@
 
 **n8n Auto Install, Manage, Backup and Restore Script on Ubuntu**
 
-![Version](https://img.shields.io/badge/Version-v1.0.0-blue.svg)
+![Version](https://img.shields.io/badge/Version-v1.0.1-blue.svg)
 ![Total Release Downloads](https://img.shields.io/github/downloads/im-JvD/n8n-installer/total?style=flat&label=total%20downloads)
-![Platform](https://img.shields.io/badge/Ubuntu-20.04%2B-orange.svg)
+![Platform](https://img.shields.io/badge/Ubuntu-22.04%2B-orange.svg)
 ![Stack](https://img.shields.io/badge/Docker%20%2B%20PostgreSQL%20%2B%20Nginx-brightgreen.svg)
 ![License](https://img.shields.io/badge/License-GPLv3-green.svg)
 <br><br>
@@ -135,8 +135,8 @@ From the menu inside, you can do the following:
 
 | Item | Value |
 |---|---|
-| Script Version | `v1.0.0` |
-| Operating System | Ubuntu 20.04+ |
+| Script Version | `v1.0.1` |
+| Operating System | Ubuntu 22.04+ |
 | Run | Docker |
 | Database | PostgreSQL 16 |
 | Webserver | Nginx |
