@@ -194,4 +194,6 @@
 
 اگر این پروژه برایت مفید بود، با دادن ستاره ⭐ از آن حمایت کن.
 
+  طراحی و توسعه با ❤️ توسط <a href="https://mohamadjavadkarimi.ir/" target="_blank">im – JvD</a>
+
 </div>
