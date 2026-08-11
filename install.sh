@@ -39,7 +39,7 @@ pause() {
 
 install_dependencies() {
     echo -e "${BLUE}	Installing dependencies...${NC}"
-    apt update && apt upgrade -y
+    sudo apt update && apt upgrade -y && apt autoremove -y
     apt install -y curl nginx certbot python3-certbot-nginx ca-certificates openssl zip unzip
     
     if ! command -v docker >/dev/null 2>&1; then
@@ -208,7 +208,7 @@ install_n8n() {
     systemctl start n8n-docker
     make_global
     echo -e "${GREEN}	Installation completed!${NC}"
-    pause
+	docker compose logs -f --tail 50
 }
 
 update_n8n() {
