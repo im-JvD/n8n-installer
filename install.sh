@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Project: n8n Auto-Installer (PostgreSQL Edition) - Optimized v6.1
+# Project: n8n Auto-Installer (PostgreSQL Edition) - Optimized v1.0.0
 # License: GPLv3
 # User: im-JvD
 
@@ -324,7 +324,7 @@ EOF
                 restore_config="$restore_dir/config"
                 restore_app_data="$restore_dir/app_data"
 
-            # Compatibility with the old v6.1 archive structure.
+            # Compatibility with the old v1.0.0 archive structure.
             elif [ -f "$restore_dir/tmp/db_dump.sql" ]; then
                 dump_file="$restore_dir/tmp/db_dump.sql"
                 restore_config="$restore_dir/opt/n8n"
@@ -459,7 +459,7 @@ menu() {
         echo ""
         echo -e "${BLUE}==========================================${NC}"
         echo -e "${PINK}      n8n Manager ( PostgreSQL )${NC}"
-        echo -e "${PINK}                  v 1.0.0${NC}"
+        echo -e "${PINK}               v 1.0.0${NC}"
         echo -e "${BLUE}==========================================${NC}"
         echo ""
         echo -e "${GREEN}1)${NC} Install n8n (Full Setup)"
