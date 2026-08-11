@@ -1,9 +1,5 @@
 #!/bin/bash
 
-# Project: n8n Auto-Installer (PostgreSQL) - v1.0.0
-# License: GPLv3
-# User: im-JvD
-
 set -e
 
 # --- Colors ---
@@ -50,7 +46,7 @@ install_dependencies() {
     systemctl enable --now nginx
 }
 
-# New function for Systemd persistence
+# Function for Systemd persistence
 create_systemd_service() {
     echo -e "${BLUE}	Creating systemd service for persistence...${NC}"
     cat > "$SYSTEMD_FILE" <<EOF
@@ -230,7 +226,7 @@ backup_restore_menu() {
         echo ""
         echo -e "   =========================================="
         echo -e "   ${BLUE}      N8N Manager ${NC}( ${GREEN}PostgreSQL${NC} )"
-        echo -e "   ${NC}             Version ${GREEN}1.0.0${NC}"
+        echo -e "   ${NC}             Version ${GREEN}1.0.1${NC}"
         echo -e "   =========================================="
         echo ""
         echo -e "	${NC}1 - ${YELLOW}Create ${GREEN}Full Backup"
@@ -372,7 +368,6 @@ EOF
                     restore_config="$restore_dir/config"
                     restore_app_data="$restore_dir/app_data"
 
-                # Compatibility with the old v1.0.0 archive structure.
                 elif [ -f "$restore_dir/tmp/db_dump.sql" ]; then
                     dump_file="$restore_dir/tmp/db_dump.sql"
                     restore_config="$restore_dir/opt/n8n"
@@ -509,7 +504,7 @@ management_sub_menu() {
         echo ""
         echo -e "   =========================================="
         echo -e "   ${BLUE}      N8N Manager ${NC}( ${GREEN}PostgreSQL${NC} )"
-        echo -e "   ${NC}             Version ${GREEN}1.0.0${NC}"
+        echo -e "   ${NC}             Version ${GREEN}1.0.1${NC}"
         echo -e "   =========================================="
         echo ""
         echo -e "	${NC}1 - ${YELLOW}Restart Service"
@@ -541,7 +536,7 @@ menu() {
         echo ""
         echo -e "   =========================================="
         echo -e "   ${BLUE}      N8N Manager ${NC}( ${GREEN}PostgreSQL${NC} )"
-        echo -e "   ${NC}             Version ${GREEN}1.0.0${NC}"
+        echo -e "   ${NC}             Version ${GREEN}1.0.1${NC}"
         echo -e "   =========================================="
         echo ""
         echo -e "	${NC}1 - ${GREEN}Installing ${NC}N8N Service"
