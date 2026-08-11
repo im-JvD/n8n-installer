@@ -49,7 +49,7 @@
 
 </div>
 
-<pre><code>curl -fsSL https://github.com/im-JvD/n8n-installer/releases/download/v1.0.0/installer.sh | bash</code></pre>
+<pre><code>curl -fsSL https://github.com/im-JvD/n8n-installer/releases/latest/download/installer.sh | bash</code></pre>
 
 
 <div align="center"><br>
