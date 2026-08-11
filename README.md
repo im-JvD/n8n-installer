@@ -8,6 +8,8 @@
 ![Platform](https://img.shields.io/badge/Ubuntu-20.04%2B-orange.svg)
 ![Stack](https://img.shields.io/badge/Docker%20%2B%20PostgreSQL%20%2B%20Nginx-brightgreen.svg)
 ![License](https://img.shields.io/badge/License-GPLv3-green.svg)
+<br><br>
+<a href="https://github.com/im-JvD/n8n-installer/blob/main/README_EN.md">Study in Persian</a>
 
 </div>
 
