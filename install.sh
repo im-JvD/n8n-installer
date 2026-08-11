@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Project: n8n Auto-Installer (PostgreSQL Edition) - Optimized v1.0.1
+# Project: n8n Auto-Installer (PostgreSQL) - v1.0.0
 # License: GPLv3
 # User: im-JvD
 
@@ -34,16 +34,16 @@ make_global() {
 
 pause() {
     echo
-    read -rp " Press Enter to continue..."
+    read -rp " Press Enter to Continue..."
 }
 
 install_dependencies() {
-    echo -e "${BLUE}⚡️ Installing dependencies...${NC}"
+    echo -e "${BLUE}	Installing dependencies...${NC}"
     apt update && apt upgrade -y
     apt install -y curl nginx certbot python3-certbot-nginx ca-certificates openssl zip unzip
     
     if ! command -v docker >/dev/null 2>&1; then
-        echo -e "${BLUE}🐳 Installing Docker...${NC}"
+        echo -e "${BLUE}	Installing Docker...${NC}"
         curl -fsSL https://get.docker.com | sh
     fi
     systemctl enable --now docker
@@ -52,7 +52,7 @@ install_dependencies() {
 
 # New function for Systemd persistence
 create_systemd_service() {
-    echo -e "${BLUE}⚙️ Creating systemd service for persistence...${NC}"
+    echo -e "${BLUE}	Creating systemd service for persistence...${NC}"
     cat > "$SYSTEMD_FILE" <<EOF
 [Unit]
 Description=n8n Docker Compose Service
@@ -173,7 +173,7 @@ EOF
 }
 
 issue_ssl() {
-    echo -e "${BLUE}🔐 Requesting SSL certificate...${NC}"
+    echo -e "${BLUE}	Requesting SSL certificate...${NC}"
     certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$EMAIL" --redirect
 }
 
@@ -207,13 +207,13 @@ install_n8n() {
     cd "$INSTALL_DIR"
     systemctl start n8n-docker
     make_global
-    echo -e "${GREEN}✅ Installation completed!${NC}"
+    echo -e "${GREEN}	Installation completed!${NC}"
     pause
 }
 
 update_n8n() {
     if [ ! -f "$COMPOSE_FILE" ]; then echo -e "${RED}Not installed.${NC}"; pause; return; fi
-    echo -e "${BLUE}🔄 Updating n8n...${NC}"
+    echo -e "${BLUE}	Updating n8n...${NC}"
     cd "$INSTALL_DIR"
     docker compose pull && docker compose up -d
     echo -e "${GREEN}Updated.${NC}"
@@ -223,13 +223,20 @@ update_n8n() {
 backup_restore_menu() {
     while true; do
         clear
-        echo -e "${PURPLE}==========================================${NC}"
-        echo -e "${PURPLE}      n8n Full System Backup & Restore${NC}"
-        echo -e "${PURPLE}==========================================${NC}"
-        echo -e "1) ${GREEN}Create Full Backup${NC} (App data + Config + SQL)"
-        echo -e "2) ${YELLOW}Restore Full Backup${NC}"
-        echo -e "0) Back to Management Menu"
-        read -rp "Choice: " br_choice
+        echo ""
+        echo -e "Github Page : ${PURPLE} https://github.com/im-JvD/n8n-installer${NC}"
+        echo ""
+        echo -e "   =========================================="
+        echo -e "   ${BLUE}      N8N Manager ${NC}( ${GREEN}PostgreSQL${NC} )"
+        echo -e "   ${NC}             Version ${GREEN}1.0.0${NC}"
+        echo -e "   =========================================="
+        echo ""
+        echo -e "	${NC}1 - ${YELLOW}Create ${GREEN}Full Backup"
+        echo -e "	${NC}2 - ${YELLOW}Restore ${GREEN}Full Backup"
+        echo ""
+        echo -e "      ${NC}0 - Back to Management Menu"
+        echo ""
+        read -rp "   Choice: " br_choice
 
         if [ ! -f "$ENV_FILE" ]; then
             echo -e "${RED}Error: .env file not found.${NC}"
@@ -309,7 +316,9 @@ EOF
                     return
                 fi
 
-                echo -e "${YELLOW}Available backups:${NC}"
+                echo ""
+                echo -e "${YELLOW}Available Backups:${NC}"
+                echo ""
                 for i in "${!backups[@]}"; do
                     printf "%s) %s\n" "$((i+1))" "$(basename "${backups[$i]}")"
                 done
@@ -471,7 +480,7 @@ EOF
 }
 
 remove_n8n() {
-    echo -e "${RED}⚠️  WARNING: Delete EVERYTHING?${NC}"
+    echo -e "${RED}	WARNING : Delete EVERYTHING?${NC}"
     read -rp "Type 'DELETE': " confirm
     if [[ "$confirm" == "DELETE" ]]; then
         systemctl stop n8n-docker
@@ -490,16 +499,26 @@ remove_n8n() {
 management_sub_menu() {
     while true; do
         clear
-        echo -e "${BLUE}=== Management N8N Service ===${NC}"
-        echo "1) Restart Service"
-        echo "2) Backup & Restore"
-        echo "3) Status & Live Logs"
-        echo "0) Back"
-        read -rp "Choice: " m_choice
+        echo ""
+        echo -e "Github Page : ${PURPLE} https://github.com/im-JvD/n8n-installer${NC}"
+        echo ""
+        echo -e "   =========================================="
+        echo -e "   ${BLUE}      N8N Manager ${NC}( ${GREEN}PostgreSQL${NC} )"
+        echo -e "   ${NC}             Version ${GREEN}1.0.0${NC}"
+        echo -e "   =========================================="
+        echo ""
+        echo -e "	${NC}1 - ${YELLOW}Restart Service"
+        echo -e "	${NC}2 - ${GREEN}Backup${NC} & ${RED}Restore${NC}"
+        echo -e "	${NC}3 - ${GREEN}Status${NC} & ${GREEN}Live${NC} Logs"
+        echo ""
+        echo -e "      ${NC}0 - ${NC}Back"
+        echo ""
+        read -rp "   Choice: " m_choice
         case "$m_choice" in
             1) 
                 cd "$INSTALL_DIR" && docker compose up -d --force-recreate
-                echo -e "${GREEN}Service restarted.${NC}"; pause ;;
+				echo ""
+                echo -e "${GREEN}	N8N Service Restarted.${NC}"; pause ;;
             2) backup_restore_menu ;;
             3) show_status_and_logs ;;
             0) break ;;
@@ -513,17 +532,23 @@ menu() {
     while true; do
         clear
         echo ""
-        echo -e "${BLUE}==========================================${NC}"
-        echo -e "${PINK}      n8n Manager ( PostgreSQL )${NC}"
-        echo -e "${PINK}               v 1.0.1${NC}"
-        echo -e "${BLUE}==========================================${NC}"
+        echo -e "Github Page : ${PURPLE} https://github.com/im-JvD/n8n-installer${NC}"
         echo ""
-        echo -e "${GREEN}1)${NC} Installing N8N Service"
-        echo -e "${GREEN}2)${NC} Management N8N Service"
-        echo -e "${BLUE}3)${NC} Update Service"
-        echo -e "${RED}4)${NC} Remove Everything"
-        echo -e "${NC}0) Exit"
-        read -rp "Choice: " choice
+        echo -e "   =========================================="
+        echo -e "   ${BLUE}      N8N Manager ${NC}( ${GREEN}PostgreSQL${NC} )"
+        echo -e "   ${NC}             Version ${GREEN}1.0.0${NC}"
+        echo -e "   =========================================="
+        echo ""
+        echo -e "	${NC}1 - ${GREEN}Installing ${NC}N8N Service"
+        echo -e "	${NC}2 - ${YELLOW}Management ${NC}N8N Service"
+        echo -e "	${NC}3 - ${GREEN}Update ${NC}Service"
+        echo -e "	${NC}4 - ${RED}Remove ${NC}Everything"
+        echo ""
+        echo -e "      ${NC}0 - ${NC}Exit"
+        echo ""
+        echo -e "   ==================="
+        echo ""
+        read -rp "   Choice: " choice
         case "$choice" in
             1) install_n8n ;;
             2) management_sub_menu ;;
