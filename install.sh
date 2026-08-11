@@ -523,10 +523,7 @@ management_sub_menu() {
             1) 
                 cd "$INSTALL_DIR" && docker compose up -d --force-recreate
 				echo ""
-                echo -e "${GREEN}	N8N Service Restarted.${NC}"; pause ;;
-				echo ""
-				docker compose logs -f --tail 10
-				echo ""
+                echo -e "${GREEN}	N8N Service Restarted.${NC}"; echo "" ; docker compose logs -f --tail 10 ; echo "" ;;
             2) backup_restore_menu ;;
             3) show_status_and_logs ;;
             0) break ;;
