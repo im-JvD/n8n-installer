@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Project: n8n Auto-Installer (PostgreSQL Edition) - Optimized v6
+# Project: n8n Auto-Installer (PostgreSQL Edition) - Optimized v6.1
 # License: GPLv3
 # User: im-JvD
 
@@ -209,35 +209,62 @@ update_n8n() {
 backup_restore_menu() {
     clear
     echo -e "${PURPLE}=========================================="
-    echo -e "      n8n Backup & Restore System"
+    echo -e "      n8n Full System Backup & Restore"
     echo -e "==========================================${NC}"
-    echo -e "1) ${GREEN}Create Backup${NC} (Database -> Zip)"
-    echo -e "2) ${YELLOW}Restore Backup${NC} (Zip -> Database)"
+    echo -e "1) ${GREEN}Create Full Backup${NC} (Files + Database)"
+    echo -e "2) ${YELLOW}Restore Full Backup${NC} (Files + Database)"
     echo -e "0) Back to Main Menu"
     read -rp "Choice: " br_choice
 
+    if [ ! -f "$ENV_FILE" ]; then echo -e "${RED}Error: .env not found!${NC}"; pause; return; fi
     source "$ENV_FILE"
 
     case "$br_choice" in
         1)
-            echo -e "${BLUE}Creating backup...${NC}"
+            echo -e "${BLUE}Starting Full Backup...${NC}"
             TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-            BACKUP_NAME="n8n_backup_$TIMESTAMP"
-            docker exec n8n-db pg_dump -U "$POSTGRES_USER" n8n_db > "$BACKUP_DIR/$BACKUP_NAME.sql"
-            cd "$BACKUP_DIR" && zip -m "$BACKUP_NAME.zip" "$BACKUP_NAME.sql"
-            echo -e "${GREEN}Backup created successfully: $BACKUP_DIR/$BACKUP_NAME.zip${NC}"
+            BACKUP_NAME="n8n_full_backup_$TIMESTAMP"
+            
+            # 1. Dump Database
+            echo -e " - Exporting Database..."
+            docker exec n8n-db pg_dump -U "$POSTGRES_USER" n8n_db > "/tmp/db_dump.sql"
+            
+            # 2. Zip Everything (Install dir, Data dir, and DB dump)
+            echo -e " - Compressing Files (This may take a moment)..."
+            zip -r "$BACKUP_DIR/$BACKUP_NAME.zip" "$INSTALL_DIR" "$DATA_DIR" "/tmp/db_dump.sql" -x "$BACKUP_DIR/*"
+            
+            rm "/tmp/db_dump.sql"
+            echo -e "${GREEN}✅ Full Backup created: $BACKUP_DIR/$BACKUP_NAME.zip${NC}"
             pause
             ;;
         2)
             echo -e "${YELLOW}Available backups in $BACKUP_DIR:${NC}"
             ls "$BACKUP_DIR"/*.zip 2>/dev/null || echo "No backups found."
             read -rp "Enter full zip filename to restore: " ZIP_FILE
+            
             if [ -f "$BACKUP_DIR/$ZIP_FILE" ]; then
-                echo -e "${RED}Restoring... Current data will be overwritten!${NC}"
-                unzip -p "$BACKUP_DIR/$ZIP_FILE" > "$BACKUP_DIR/restore_temp.sql"
-                docker exec -i n8n-db psql -U "$POSTGRES_USER" n8n_db < "$BACKUP_DIR/restore_temp.sql"
-                rm "$BACKUP_DIR/restore_temp.sql"
-                echo -e "${GREEN}Database restoration complete.${NC}"
+                echo -e "${RED}⚠️  Restoring will overwrite EVERYTHING!${NC}"
+                read -rp "Are you sure? (y/N): " confirm_res
+                if [[ "$confirm_res" =~ ^[Yy]$ ]]; then
+                    echo -e "${BLUE}- Stopping containers...${NC}"
+                    cd "$INSTALL_DIR" && docker compose down || true
+                    
+                    echo -e "${BLUE}- Extracting Files...${NC}"
+                    unzip -o "$BACKUP_DIR/$ZIP_FILE" -d /
+                    
+                    echo -e "${BLUE}- Restarting Database to apply SQL...${NC}"
+                    docker compose up -d db
+                    sleep 5 # Wait for DB to be ready
+                    
+                    echo -e "${BLUE}- Importing SQL Dump...${NC}"
+                    # Find extracted sql in /tmp or within zip structure
+                    docker exec -i n8n-db psql -U "$POSTGRES_USER" n8n_db < "/tmp/db_dump.sql"
+                    
+                    echo -e "${BLUE}- Starting all services...${NC}"
+                    docker compose up -d
+                    
+                    echo -e "${GREEN}✅ System Restoration Complete!${NC}"
+                fi
             else
                 echo -e "${RED}File not found.${NC}"
             fi
