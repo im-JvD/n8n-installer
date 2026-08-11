@@ -5,6 +5,7 @@
 **اسکریپت نصب، مدیریت، بکاپ و ریستور خودکار n8n روی Ubuntu**
 
 ![Version](https://img.shields.io/badge/Version-v1.0.0-blue.svg)
+![Total Release Downloads](https://img.shields.io/github/downloads/im-JvD/n8n-installer/total?style=flat&label=total%20downloads)
 ![Platform](https://img.shields.io/badge/Ubuntu-20.04%2B-orange.svg)
 ![Stack](https://img.shields.io/badge/Docker%20%2B%20PostgreSQL%20%2B%20Nginx-brightgreen.svg)
 ![License](https://img.shields.io/badge/License-GPLv3-green.svg)
