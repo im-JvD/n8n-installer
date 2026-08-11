@@ -48,7 +48,7 @@
 
 </div>
 
-<pre><code>curl -o install.sh https://raw.githubusercontent.com/im-JvD/n8n-installer/main/install.sh &amp;&amp; chmod +x install.sh &amp;&amp; sudo ./install.sh</code></pre>
+<pre><code>curl -fsSL https://github.com/im-JvD/n8n-installer/releases/download/v1.0.0/installer.sh | bash</code></pre>
 
 
 <div align="center"><br>
