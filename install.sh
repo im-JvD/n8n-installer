@@ -56,6 +56,14 @@ create_configs() {
     mkdir -p "$INSTALL_DIR"
     mkdir -p "$DATA_DIR/postgres"
     mkdir -p "$DATA_DIR/data"
+    
+    # n8n permissions
+    chown -R 1000:1000 "$DATA_DIR/data"
+    chmod -R 755 "$DATA_DIR/data"
+    
+    # postgres permissions
+    chown -R 999:999 "$DATA_DIR/postgres"
+    chmod -R 700 "$DATA_DIR/postgres"
 
     # Generate Secure DB Password if not exists
     if [ ! -f "$ENV_FILE" ]; then
