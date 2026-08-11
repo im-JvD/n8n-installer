@@ -10,6 +10,7 @@ set -e
 GREEN='\033[1;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[1;34m'
+RED='\033[1;31m'
 PURPLE='\033[1;35m'
 PINK='\033[1;38;5;206m'
 NC='\033[0m' # No Color
@@ -208,69 +209,230 @@ update_n8n() {
 
 backup_restore_menu() {
     clear
-    echo -e "${PURPLE}=========================================="
-    echo -e "      n8n Full System Backup & Restore"
-    echo -e "==========================================${NC}"
-    echo -e "1) ${GREEN}Create Full Backup${NC} (Files + Database)"
-    echo -e "2) ${YELLOW}Restore Full Backup${NC} (Files + Database)"
+    echo -e "${PURPLE}==========================================${NC}"
+    echo -e "${PURPLE}      n8n Full System Backup & Restore${NC}"
+    echo -e "${PURPLE}==========================================${NC}"
+    echo -e "1) ${GREEN}Create Full Backup${NC} (App data + Config + SQL)"
+    echo -e "2) ${YELLOW}Restore Full Backup${NC}"
     echo -e "0) Back to Main Menu"
     read -rp "Choice: " br_choice
 
-    if [ ! -f "$ENV_FILE" ]; then echo -e "${RED}Error: .env not found!${NC}"; pause; return; fi
-    source "$ENV_FILE"
+    if [ ! -f "$ENV_FILE" ]; then
+        echo -e "${RED}Error: .env file not found.${NC}"
+        pause
+        return
+    fi
 
     case "$br_choice" in
         1)
-            echo -e "${BLUE}Starting Full Backup...${NC}"
-            TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-            BACKUP_NAME="n8n_full_backup_$TIMESTAMP"
-            
-            # 1. Dump Database
-            echo -e " - Exporting Database..."
-            docker exec n8n-db pg_dump -U "$POSTGRES_USER" n8n_db > "/tmp/db_dump.sql"
-            
-            # 2. Zip Everything (Install dir, Data dir, and DB dump)
-            echo -e " - Compressing Files (This may take a moment)..."
-            zip -r "$BACKUP_DIR/$BACKUP_NAME.zip" "$INSTALL_DIR" "$DATA_DIR" "/tmp/db_dump.sql" -x "$BACKUP_DIR/*"
-            
-            rm "/tmp/db_dump.sql"
-            echo -e "${GREEN}✅ Full Backup created: $BACKUP_DIR/$BACKUP_NAME.zip${NC}"
-            pause
-            ;;
-        2)
-            echo -e "${YELLOW}Available backups in $BACKUP_DIR:${NC}"
-            ls "$BACKUP_DIR"/*.zip 2>/dev/null || echo "No backups found."
-            read -rp "Enter full zip filename to restore: " ZIP_FILE
-            
-            if [ -f "$BACKUP_DIR/$ZIP_FILE" ]; then
-                echo -e "${RED}⚠️  Restoring will overwrite EVERYTHING!${NC}"
-                read -rp "Are you sure? (y/N): " confirm_res
-                if [[ "$confirm_res" =~ ^[Yy]$ ]]; then
-                    echo -e "${BLUE}- Stopping containers...${NC}"
-                    cd "$INSTALL_DIR" && docker compose down || true
-                    
-                    echo -e "${BLUE}- Extracting Files...${NC}"
-                    unzip -o "$BACKUP_DIR/$ZIP_FILE" -d /
-                    
-                    echo -e "${BLUE}- Restarting Database to apply SQL...${NC}"
-                    docker compose up -d db
-                    sleep 5 # Wait for DB to be ready
-                    
-                    echo -e "${BLUE}- Importing SQL Dump...${NC}"
-                    # Find extracted sql in /tmp or within zip structure
-                    docker exec -i n8n-db psql -U "$POSTGRES_USER" n8n_db < "/tmp/db_dump.sql"
-                    
-                    echo -e "${BLUE}- Starting all services...${NC}"
-                    docker compose up -d
-                    
-                    echo -e "${GREEN}✅ System Restoration Complete!${NC}"
-                fi
-            else
-                echo -e "${RED}File not found.${NC}"
+            local timestamp backup_name stage_dir
+
+            timestamp=$(date +%Y%m%d_%H%M%S)
+            backup_name="n8n_full_backup_${timestamp}.zip"
+            stage_dir=$(mktemp -d "/tmp/n8n_backup_${timestamp}_XXXXXX")
+
+            echo -e "${BLUE}→ Exporting PostgreSQL database...${NC}"
+
+            set -a
+            source "$ENV_FILE"
+            set +a
+
+            if ! docker exec n8n-db pg_dump \
+                --no-owner \
+                --no-privileges \
+                -U "$POSTGRES_USER" \
+                "$POSTGRES_DB" > "$stage_dir/database.sql"; then
+                echo -e "${RED}Database backup failed. No backup was created.${NC}"
+                rm -rf "$stage_dir"
+                pause
+                return
             fi
+
+            echo -e "${BLUE}→ Collecting n8n configuration and application data...${NC}"
+            mkdir -p "$stage_dir/config" "$stage_dir/app_data"
+
+            cp -a "$ENV_FILE" "$stage_dir/config/.env"
+            cp -a "$COMPOSE_FILE" "$stage_dir/config/docker-compose.yml"
+
+            if [ -f "$NGINX_SITE" ]; then
+                cp -a "$NGINX_SITE" "$stage_dir/config/nginx-n8n.conf"
+            fi
+
+            cp -a "$DATA_DIR/data/." "$stage_dir/app_data/"
+
+            cat > "$stage_dir/backup-info.txt" <<EOF
+n8n Full Backup
+Created: $(date -Is)
+Database: ${POSTGRES_DB}
+Format: SQL dump + n8n application data + configuration
+EOF
+
+            echo -e "${BLUE}→ Compressing backup...${NC}"
+            (
+                cd "$stage_dir"
+                zip -qr "$BACKUP_DIR/$backup_name" .
+            )
+
+            rm -rf "$stage_dir"
+
+            echo -e "${GREEN}Backup created:${NC} $BACKUP_DIR/$backup_name"
+            echo -e "${YELLOW}Note: PostgreSQL physical data is intentionally excluded.${NC}"
             pause
             ;;
-        *) return ;;
+
+        2)
+            echo -e "${YELLOW}Available backups:${NC}"
+            find "$BACKUP_DIR" -maxdepth 1 -type f -name '*.zip' -printf '%f\n' \
+                | sort -r \
+                || true
+
+            read -rp "Enter backup filename: " zip_file
+
+            if [ -z "$zip_file" ] || [ ! -f "$BACKUP_DIR/$zip_file" ]; then
+                echo -e "${RED}Backup file not found.${NC}"
+                pause
+                return
+            fi
+
+            echo
+            echo -e "${RED}WARNING: This replaces n8n files and recreates PostgreSQL from the SQL dump.${NC}"
+            read -rp "Type RESTORE to continue: " confirm_restore
+
+            if [ "$confirm_restore" != "RESTORE" ]; then
+                echo -e "${YELLOW}Restore cancelled.${NC}"
+                pause
+                return
+            fi
+
+            local restore_dir dump_file restore_config restore_app_data
+            restore_dir=$(mktemp -d "/tmp/n8n_restore_XXXXXX")
+
+            echo -e "${BLUE}→ Validating and extracting backup...${NC}"
+
+            if unzip -Z1 "$BACKUP_DIR/$zip_file" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
+                echo -e "${RED}Unsafe backup archive detected. Restore cancelled.${NC}"
+                rm -rf "$restore_dir"
+                pause
+                return
+            fi
+
+            unzip -q "$BACKUP_DIR/$zip_file" -d "$restore_dir"
+
+            # New backup format.
+            if [ -f "$restore_dir/database.sql" ]; then
+                dump_file="$restore_dir/database.sql"
+                restore_config="$restore_dir/config"
+                restore_app_data="$restore_dir/app_data"
+
+            # Compatibility with the old v6.1 archive structure.
+            elif [ -f "$restore_dir/tmp/db_dump.sql" ]; then
+                dump_file="$restore_dir/tmp/db_dump.sql"
+                restore_config="$restore_dir/opt/n8n"
+                restore_app_data="$restore_dir/var/lib/n8n/data"
+            else
+                echo -e "${RED}No valid database.sql file was found in this archive.${NC}"
+                rm -rf "$restore_dir"
+                pause
+                return
+            fi
+
+            if [ ! -f "$restore_config/.env" ] || \
+               [ ! -f "$restore_config/docker-compose.yml" ] || \
+               [ ! -d "$restore_app_data" ]; then
+                echo -e "${RED}Backup is incomplete: config or n8n data is missing.${NC}"
+                rm -rf "$restore_dir"
+                pause
+                return
+            fi
+
+            echo -e "${BLUE}→ Stopping containers...${NC}"
+            cd "$INSTALL_DIR"
+            docker compose down || true
+
+            echo -e "${BLUE}→ Restoring configuration and n8n application data...${NC}"
+            mkdir -p "$INSTALL_DIR" "$DATA_DIR/data"
+
+            cp -f "$restore_config/.env" "$ENV_FILE"
+            cp -f "$restore_config/docker-compose.yml" "$COMPOSE_FILE"
+
+            if [ -f "$restore_config/nginx-n8n.conf" ]; then
+                cp -f "$restore_config/nginx-n8n.conf" "$NGINX_SITE"
+                nginx -t && systemctl reload nginx
+            fi
+
+            rm -rf "$DATA_DIR/data"
+            mkdir -p "$DATA_DIR/data"
+            cp -a "$restore_app_data/." "$DATA_DIR/data/"
+
+            # unzip/cp can leave files owned by root. n8n runs as UID:GID 1000:1000.
+            chown -R 1000:1000 "$DATA_DIR/data"
+            chmod -R u+rwX,go-rwx "$DATA_DIR/data"
+
+            # Do NOT restore PostgreSQL's raw data directory.
+            # Recreate it, then restore only the SQL dump.
+            echo -e "${BLUE}→ Recreating PostgreSQL data directory...${NC}"
+            rm -rf "$DATA_DIR/postgres"
+            mkdir -p "$DATA_DIR/postgres"
+            chown -R 999:999 "$DATA_DIR/postgres"
+            chmod 700 "$DATA_DIR/postgres"
+
+            # Reload restored credentials, not credentials from before extraction.
+            set -a
+            source "$ENV_FILE"
+            set +a
+
+            echo -e "${BLUE}→ Starting a fresh PostgreSQL instance...${NC}"
+            cd "$INSTALL_DIR"
+            docker compose up -d db
+
+            echo -e "${BLUE}→ Waiting for PostgreSQL...${NC}"
+            local db_ready=false
+            for _ in $(seq 1 30); do
+                if docker exec n8n-db pg_isready \
+                    -U "$POSTGRES_USER" \
+                    -d "$POSTGRES_DB" >/dev/null 2>&1; then
+                    db_ready=true
+                    break
+                fi
+                sleep 2
+            done
+
+            if [ "$db_ready" != true ]; then
+                echo -e "${RED}PostgreSQL did not become ready. Check: docker logs n8n-db${NC}"
+                rm -rf "$restore_dir"
+                pause
+                return
+            fi
+
+            echo -e "${BLUE}→ Importing database SQL dump...${NC}"
+            if ! docker exec -i n8n-db psql \
+                -v ON_ERROR_STOP=1 \
+                -U "$POSTGRES_USER" \
+                -d "$POSTGRES_DB" < "$dump_file"; then
+                echo -e "${RED}Database import failed. Services remain stopped for inspection.${NC}"
+                rm -rf "$restore_dir"
+                pause
+                return
+            fi
+
+            echo -e "${BLUE}→ Starting n8n...${NC}"
+            docker compose up -d --force-recreate
+
+            rm -rf "$restore_dir"
+
+            echo -e "${GREEN}System restore completed successfully.${NC}"
+            echo -e "${YELLOW}Use Status & Live Logs to verify startup.${NC}"
+            pause
+            ;;
+
+        0)
+            return
+            ;;
+
+        *)
+            echo -e "${RED}Invalid selection.${NC}"
+            pause
+            ;;
     esac
 }
 
@@ -297,6 +459,7 @@ menu() {
         echo ""
         echo -e "${BLUE}==========================================${NC}"
         echo -e "${PINK}      n8n Manager ( PostgreSQL )${NC}"
+        echo -e "${PINK}                  v 1.0.0${NC}"
         echo -e "${BLUE}==========================================${NC}"
         echo ""
         echo -e "${GREEN}1)${NC} Install n8n (Full Setup)"
