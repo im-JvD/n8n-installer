@@ -131,20 +131,19 @@ From the menu inside, you can do the following:
 
 </div>
 
-<div dir="ltr" align="left">
+<div dir="ltr" align="center">
 
 | Item | Value |
 |---|---|
+| Admin command | `n8n` |
 | Script Version | `v1.0.1` |
 | Operating System | Ubuntu 22.04+ |
 | Run | Docker |
 | Database | PostgreSQL 16 |
 | Webserver | Nginx |
 | SSL | Let's Encrypt / Certbot |
-| n8n port | `5678` |
 | Installation path | `/opt/n8n` |
 | Data path | `/var/lib/n8n/data` |
-| Admin command | `n8n` |
 
 </div>
 
@@ -191,5 +190,7 @@ From the menu inside, you can do the following:
 This project is released under the **GNU General Public License v3.0**.
 
 If you found this project useful, please support it by giving it a ⭐ star.
+
+by <a href="https://mohamadjavadkarimi.ir/" target="_blank"><b>im – JvD</b></a>
 
 </div>
