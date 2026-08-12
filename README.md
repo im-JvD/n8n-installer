@@ -133,20 +133,19 @@
 
 </div>
 
-<div dir="rtl" align="right">
+<div dir="rtl" align="center">
 
 | مورد | مقدار |
 |---|---|
+| منوی مدیریتی اسکریپت | `n8n` |
 | نسخه اسکریپت | `v1.0.1` |
 | سیستم‌عامل | Ubuntu 22.04+ |
 | اجرا | Docker |
 | دیتابیس | PostgreSQL 16 |
 | وب‌سرور | Nginx |
 | SSL | Let's Encrypt / Certbot |
-| پورت n8n | `5678` |
 | مسیر نصب | `/opt/n8n` |
 | مسیر داده‌ها | `/var/lib/n8n/data` |
-| دستور مدیریت | `n8n` |
 
 </div>
 
@@ -194,6 +193,6 @@
 
 اگر این پروژه برایت مفید بود، با دادن ستاره ⭐ از آن حمایت کن.
 
-  طراحی و توسعه با ❤️ توسط <a href="https://mohamadjavadkarimi.ir/" target="_blank">im – JvD</a>
+طراحی و توسعه با ❤️ توسط <a href="https://mohamadjavadkarimi.ir/" target="_blank">im – JvD</a>
 
 </div>
